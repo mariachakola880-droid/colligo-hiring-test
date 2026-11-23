@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { prisma } from './db.js';
 import { config } from './config.js';
 import { ah, HttpError } from './http.js';
+import { normalizeEmail } from './emails.js';
 
 const COOKIE = 'fd_token';
 const TTL_MS = 12 * 60 * 60 * 1000;
@@ -13,7 +14,7 @@ export const authRoutes = Router();
 authRoutes.post('/login', ah(async (req, res) => {
   const { email, password } = req.body ?? {};
   if (typeof email !== 'string' || typeof password !== 'string') throw new HttpError(400, 'Email and password are required');
-  const agent = await prisma.agent.findUnique({ where: { email: email.trim().toLowerCase() } });
+  const agent = await prisma.agent.findUnique({ where: { email: normalizeEmail(email) } });
   if (!agent || !(await bcrypt.compare(password, agent.passwordHash))) throw new HttpError(401, 'Invalid email or password');
 
   const token = jwt.sign({ aid: agent.id, name: agent.name, role: agent.role }, config.jwtSecret, { expiresIn: TTL_MS / 1000 });

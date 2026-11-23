@@ -5,6 +5,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../db.js';
 import { HttpError, requireText } from '../http.js';
+import { normalizeEmail } from '../emails.js';
 import { getCalendar } from './calendarService.js';
 import { autoCloseIfDue } from '../jobs/autoClose.js';
 import { REOPEN_WINDOW_MS } from '../sla/policy.js';
@@ -63,7 +64,7 @@ async function createTicketTx(tx, cal, { customerId, subject, body, priority, re
 
 export async function createTicket({ name, email, subject, body, priority = 'low' }) {
   const cleanName = requireText(name, 'Name', 200);
-  const cleanEmail = requireText(email, 'Email', 320).toLowerCase();
+  const cleanEmail = normalizeEmail(requireText(email, 'Email', 320));
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail)) throw new HttpError(400, 'Email is not valid');
   const cleanSubject = requireText(subject, 'Subject', 300);
   const cleanBody = requireText(body, 'Message');

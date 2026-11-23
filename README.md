@@ -79,6 +79,7 @@ The brief gives a story rather than a requirements list. These are the rules I t
 ### Pausing
 
 - The clock **pauses while a ticket is waiting on the customer** ("that week is not our fault") **and while it is resolved**. A reopened ticket continues from where it stopped.
+- **The only way to wait on the customer is to ask them something:** a reply sent with "wait for customer" ticked. Agents can't set the status directly, so the clock can't be paused without contacting the customer.
 - Pauses are derived from the audit log, not from mutable ticket columns.
 
 ### Priority changes (the open question from the meeting)

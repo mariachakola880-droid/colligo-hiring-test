@@ -19,7 +19,7 @@ async function setup() {
 after(async () => { if (prisma) await prisma.$disconnect(); });
 
 async function loggedInAgent(name) {
-  const email = `${name}-${uid}@test.local`;
+  const email = `${name}-${uid}@test.local`.toLowerCase();
   await prisma.agent.create({ data: { name, email, passwordHash: await bcrypt.hash('pw', 4) } });
   const session = request.agent(app);
   await session.post('/api/auth/login').send({ email, password: 'pw' }).expect(200);
@@ -100,4 +100,21 @@ test('waiting on the customer pauses the SLA; the customer reply resumes it', { 
   const resumed = await agent.get(`/api/tickets/${id}`).expect(200);
   assert.equal(resumed.body.ticket.status, 'open');
   assert.notEqual(resumed.body.ticket.sla.resolution.state, 'paused');
+});
+
+test('agents cannot pause the SLA without contacting the customer', { skip }, async () => {
+  await setup();
+  const agent = await loggedInAgent('Pauser');
+  const { id } = await newTicket();
+  await agent.post(`/api/tickets/${id}/claim`).expect(200);
+  const res = await agent.post(`/api/tickets/${id}/status`).send({ status: 'waiting_on_customer' }).expect(409);
+  assert.match(res.body.error, /send them a reply/);
+  const detail = await agent.get(`/api/tickets/${id}`).expect(200);
+  assert.equal(detail.body.ticket.status, 'open');
+  assert.notEqual(detail.body.ticket.sla.resolution.state, 'paused');
+});
+
+test('the database rejects an agent email that is not lowercase', { skip }, async () => {
+  await setup();
+  await assert.rejects(prisma.agent.create({ data: { name: 'Mixed', email: `Mixed-${uid}@Test.Local`, passwordHash: 'x' } }));
 });

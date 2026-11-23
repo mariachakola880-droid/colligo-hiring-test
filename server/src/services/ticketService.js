@@ -7,16 +7,9 @@ import { autoCloseIfDue } from '../jobs/autoClose.js';
 import {
   asAgent, recordEvent, transition, refreshSlaCache, slaEventsInclude, slaFor, slaToJson,
 } from './ticketCore.js';
+import { agentTransitionError } from './rules.js';
 
 const PRIORITIES = ['urgent', 'medium', 'low'];
-
-// Status changes an agent may make. Agents can close ONLY resolved tickets;
-// tickets waiting on the customer are closed by the auto-close job.
-const AGENT_TRANSITIONS = {
-  open: ['waiting_on_customer', 'resolved'],
-  waiting_on_customer: ['open', 'resolved'],
-  resolved: ['closed'],
-};
 
 async function loadTicket(tx, id) {
   const t = await tx.ticket.findUnique({ where: { id } });
@@ -201,10 +194,8 @@ export async function changeStatus(id, agent, { status, version }) {
     const t = await loadTicket(tx, id);
     assertAssigneeOrManager(t, agent, 'change its status');
     assertVersion(t, version);
-    if (!(AGENT_TRANSITIONS[t.status] ?? []).includes(status)) {
-      const hint = status === 'closed' ? ' Only resolved tickets can be closed.' : '';
-      throw new HttpError(409, `Cannot change a ${t.status} ticket to ${status}.${hint}`);
-    }
+    const error = agentTransitionError(t.status, status);
+    if (error) throw new HttpError(409, error);
     await transition(tx, t, status, asAgent(agent));
     await refreshSlaCache(tx, cal, id);
   });
