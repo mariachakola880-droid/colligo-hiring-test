@@ -53,9 +53,12 @@ The brief gives a story rather than a requirements list. These are the rules I t
 
 - **Changing priority never rewrites history.** A finished timer is judged by the priority in effect when it finished. A deadline missed under one priority stays a breach after a downgrade, and the record keeps which priority it was breached under.
 - **A running timer switches to the new priority's target, measured from creation**, so time already used counts.
-- **Escalation gets a 30-working-minute grace** (`PRIORITY_CHANGE_GRACE_MIN`): the new deadline is never earlier than the change time plus 30 minutes. Without this, escalating a ticket honestly could make it late instantly, which would teach agents not to escalate. If nobody acts within the grace, the ticket is late.
+- **A priority change gets a 30-working-minute grace** (`PRIORITY_CHANGE_GRACE_MIN`): the new deadline is never earlier than the change time plus 30 minutes. Without this, escalating a ticket honestly could make it late instantly, which would teach agents not to escalate. If nobody acts within the grace, the ticket is late.
+- **The grace can never extend past the earliest deadline under any earlier priority.** Otherwise a quick downgrade and re-escalation just before a deadline would buy 30 extra minutes and hide a breach. Escalating a medium ticket due at 14:00 at 12:30 gives until 13:00; toggling an urgent ticket due at 11:30 down and back up at 11:25 still leaves it due at 11:30.
+- On screen, a breached timer shows **the deadline it missed and the priority it was under** ("missed 11:30 under urgent"), not the current priority's deadline, which can still be hours away after a downgrade.
 
 ### Closing and reopening
 
 - **Auto-close** after 5 working days with no customer reply while waiting on them.
+- **An auto-closed ticket is not "resolved".** Its open timers end as `closed_no_reply`: neither met nor breached, so customers who go quiet don't inflate the on-time rate. If a timer had already breached before the ticket went quiet, it stays breached.
 - **Reopen window** is 7 calendar days after resolution. After that, a customer message starts a new ticket linked to the old one.

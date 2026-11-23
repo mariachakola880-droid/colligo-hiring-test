@@ -107,6 +107,17 @@ test('escalating early simply uses the new target when it is later than the grac
   assert.deepEqual(sla.response.dueAt, ist(`${MON}T11:30`));
 });
 
+test('toggling priority down and back up cannot extend the deadline (scenario F)', () => {
+  // Urgent due 11:30; low at 11:25, urgent again at 11:26. Without the cap this became 11:56.
+  const sla = computeSla(cal, {
+    createdAt: ist(`${MON}T09:30`), pauses: [], firstResponseAt: null, resolvedAt: null,
+    priorityHistory: hist(['urgent', '09:30'], ['low', '11:25'], ['urgent', '11:26']),
+  }, ist(`${MON}T11:40`));
+  assert.deepEqual(sla.response.dueAt, ist(`${MON}T11:30`));
+  assert.equal(sla.response.state, 'breached');
+  assert.deepEqual(sla.response.breach, { priority: 'urgent', dueAt: ist(`${MON}T11:30`) });
+});
+
 test('downgrading after a late reply does not erase the breach', () => {
   // Urgent, replied after 4.5 h (2 h target), then downgraded to low
   const sla = computeSla(cal, {
@@ -178,4 +189,48 @@ test('workingMinutesBetween skips nights and weekends', () => {
 test('addWorkingMinutes rejects negative or invalid minutes', () => {
   assert.throws(() => cal.addWorkingMinutes(ist('2026-11-23T10:00'), -5), RangeError);
   assert.throws(() => cal.addWorkingMinutes(ist('2026-11-23T10:00'), NaN), RangeError);
+});
+
+test('auto-closed while waiting on the customer is closed_no_reply, not met or paused (scenario H)', () => {
+  // Medium, replied 10:00 and waiting on the customer from 10:00; auto-closed a week later.
+  // The waiting -> closed change keeps the pause open (closed is a paused status).
+  const sla = computeSla(cal, {
+    priorityHistory: [{ priority: 'medium', from: ist('2026-11-23T09:30') }],
+    createdAt: ist('2026-11-23T09:30'),
+    firstResponseAt: ist('2026-11-23T10:00'),
+    pauses: [{ from: ist('2026-11-23T10:00'), to: null }],
+    resolvedAt: null,
+    closedAt: ist('2026-11-30T10:00'),
+  }, ist('2026-12-15T12:00'));
+  assert.equal(sla.response.state, 'met');
+  assert.equal(sla.resolution.state, 'closed_no_reply');
+  assert.equal(sla.resolution.breach, null);
+  assert.equal(sla.isLate, false);
+});
+
+test('a ticket that breached before the customer went quiet stays breached after auto-close', () => {
+  // Urgent, resolution due Mon 18:30; still open Tuesday when it goes to waiting, then auto-closed
+  const sla = computeSla(cal, {
+    priorityHistory: [{ priority: 'urgent', from: ist('2026-11-23T09:30') }],
+    createdAt: ist('2026-11-23T09:30'),
+    firstResponseAt: ist('2026-11-23T10:00'),
+    pauses: [{ from: ist('2026-11-24T12:00'), to: null }],
+    resolvedAt: null,
+    closedAt: ist('2026-12-01T12:00'),
+  }, ist('2026-12-15T12:00'));
+  assert.equal(sla.resolution.state, 'breached');
+  assert.deepEqual(sla.resolution.breach, { priority: 'urgent', dueAt: ist('2026-11-23T18:30') });
+  assert.equal(sla.isLate, true);
+});
+
+test('a resolved ticket that is later closed keeps its resolution result', () => {
+  const sla = computeSla(cal, {
+    priorityHistory: [{ priority: 'urgent', from: ist('2026-11-23T09:30') }],
+    createdAt: ist('2026-11-23T09:30'),
+    firstResponseAt: ist('2026-11-23T10:00'),
+    pauses: [{ from: ist('2026-11-23T15:00'), to: null }],
+    resolvedAt: ist('2026-11-23T15:00'),
+    closedAt: ist('2026-11-30T15:00'),
+  }, ist('2026-12-15T12:00'));
+  assert.equal(sla.resolution.state, 'met');
 });
