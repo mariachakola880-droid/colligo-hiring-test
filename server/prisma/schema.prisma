@@ -1,0 +1,194 @@
+// Frontdesk schema
+// All timestamps are timestamptz (stored in UTC).
+// Business hours and holidays are evaluated by the app in BUSINESS_TZ (e.g. Asia/Kolkata).
+//
+// NOT expressible in Prisma, added by hand in the init migration:
+//   - append-only triggers on ticket_events, messages, internal_notes (INC-0318)
+//   - CHECK constraint: every message has exactly one author
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum AgentRole {
+  agent
+  manager
+
+  @@map("agent_role")
+}
+
+enum TicketPriority {
+  urgent
+  medium
+  low
+
+  @@map("ticket_priority")
+}
+
+enum TicketStatus {
+  new
+  open
+  waiting_on_customer
+  resolved
+  closed
+
+  @@map("ticket_status")
+}
+
+enum ActorType {
+  agent
+  customer
+  system
+
+  @@map("actor_type")
+}
+
+enum AuthorType {
+  agent
+  customer
+
+  @@map("author_type")
+}
+
+// ---------- People ----------
+
+model Agent {
+  id           Int       @id @default(autoincrement())
+  name         String
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         AgentRole @default(agent)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  assignedTickets Ticket[]
+  messages        Message[]
+  notes           InternalNote[]
+
+  @@map("agents")
+}
+
+model Customer {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tickets  Ticket[]
+  messages Message[]
+
+  @@map("customers")
+}
+
+// ---------- Tickets ----------
+
+model Ticket {
+  id         Int            @id @default(autoincrement())
+  customerId Int            @map("customer_id")
+  subject    String
+  priority   TicketPriority
+  status     TicketStatus   @default(new)
+
+  // Claimed atomically: updateMany({ where: { id, assigneeId: null } }) and check count (INC-0291)
+  assigneeId Int? @map("assignee_id")
+  // Optimistic locking for other updates
+  version    Int  @default(1)
+
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  firstResponseAt DateTime? @map("first_response_at") @db.Timestamptz(3)
+  resolvedAt      DateTime? @map("resolved_at") @db.Timestamptz(3)
+  closedAt        DateTime? @map("closed_at") @db.Timestamptz(3)
+
+  // A new ticket created after the reopen window points back to the old one
+  reopenedFromId Int? @map("reopened_from_id")
+
+  // SLA cache for the list screen (source of truth is ticket_events)
+  responseDueAt DateTime? @map("response_due_at") @db.Timestamptz(3)
+  resolveDueAt  DateTime? @map("resolve_due_at") @db.Timestamptz(3)
+  // Set while waiting_on_customer; also drives auto-close
+  slaPausedAt   DateTime? @map("sla_paused_at") @db.Timestamptz(3)
+
+  customer     Customer @relation(fields: [customerId], references: [id])
+  assignee     Agent?   @relation(fields: [assigneeId], references: [id])
+  reopenedFrom Ticket?  @relation("Reopen", fields: [reopenedFromId], references: [id])
+  followUps    Ticket[] @relation("Reopen")
+
+  messages Message[]
+  notes    InternalNote[]
+  events   TicketEvent[]
+
+  @@index([assigneeId, status])
+  @@index([status])
+  @@index([customerId])
+  @@map("tickets")
+}
+
+// ---------- Conversation ----------
+
+// Customer-visible messages ONLY.
+model Message {
+  id         Int        @id @default(autoincrement())
+  ticketId   Int        @map("ticket_id")
+  authorType AuthorType @map("author_type")
+  agentId    Int?       @map("agent_id")
+  customerId Int?       @map("customer_id")
+  body       String
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  ticket   Ticket    @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  agent    Agent?    @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([ticketId, createdAt])
+  @@map("messages")
+}
+
+// Team-only notes. Separate table so customer-facing queries can never touch them (INC-0304).
+model InternalNote {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int      @map("ticket_id")
+  agentId   Int      @map("agent_id")
+  body      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Restrict)
+
+  @@index([ticketId, createdAt])
+  @@map("internal_notes")
+}
+
+// ---------- Audit log (INC-0318) ----------
+
+model TicketEvent {
+  id         Int       @id @default(autoincrement())
+  ticketId   Int       @map("ticket_id")
+  actorType  ActorType @map("actor_type")
+  actorId    Int?      @map("actor_id") // NULL for system events
+  // created, claimed, replied, note_added, status_changed, priority_changed,
+  // sla_paused, sla_resumed, reopened, auto_closed ...
+  eventType  String    @map("event_type")
+  payload    Json      @default("{}") // old/new values etc.
+  // DB clock, never client-supplied
+  occurredAt DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(3)
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+
+  @@index([ticketId, occurredAt])
+  @@map("ticket_events")
+}
+
+// ---------- Holidays ----------
+
+model Holiday {
+  date DateTime @id @db.Date // local date in BUSINESS_TZ
+  name String
+
+  @@map("holidays")
+}
