@@ -1,0 +1,34 @@
+# Render Blueprint: one Node web service (Express API + built React app) and a Postgres database.
+# Deploy: Render dashboard -> New -> Blueprint -> select this repo.
+
+databases:
+  - name: frontdesk-db
+    databaseName: frontdesk
+    user: frontdesk
+    plan: free
+
+services:
+  - type: web
+    name: frontdesk
+    runtime: node
+    plan: free
+    region: singapore
+    # Build the React app into web/dist (served by Express), then install the server.
+    # --include=dev: vite and the prisma CLI are devDependencies.
+    buildCommand: >-
+      cd web && npm install --include=dev && npm run build &&
+      cd ../server && npm install --include=dev
+    # Migrations run at startup (pre-deploy commands are not available on the free plan).
+    startCommand: cd server && npx prisma migrate deploy && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: frontdesk-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: BUSINESS_TZ
+        value: Asia/Kolkata
