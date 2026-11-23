@@ -6,6 +6,8 @@ databases:
     databaseName: frontdesk
     user: frontdesk
     plan: free
+    # Must match the web service region: the internal DATABASE_URL only resolves within a region.
+    region: singapore
 
 services:
   - type: web
