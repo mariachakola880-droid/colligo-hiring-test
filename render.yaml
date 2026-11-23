@@ -7,14 +7,14 @@ databases:
     user: frontdesk
     plan: free
     # Must match the web service region: the internal DATABASE_URL only resolves within a region.
-    region: singapore
+    region: oregon
 
 services:
   - type: web
     name: frontdesk
     runtime: node
     plan: free
-    region: singapore
+    region: oregon
     # Build the React app into web/dist (served by Express), then install the server.
     # --include=dev: vite and the prisma CLI are devDependencies.
     buildCommand: >-
