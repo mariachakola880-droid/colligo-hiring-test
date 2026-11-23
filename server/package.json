@@ -8,6 +8,7 @@
     "dev": "node --env-file=.env --watch src/index.js",
     "start": "node src/index.js",
     "test": "node --test",
+    "test:db": "RUN_DB_TESTS=1 node --env-file=.env --test tests/api.db.test.js",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "node --env-file=.env prisma/seed.js",
@@ -23,5 +24,8 @@
   "devDependencies": {
     "prisma": "^6.16.0",
     "supertest": "^7.1.0"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   }
 }

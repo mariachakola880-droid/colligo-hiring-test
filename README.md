@@ -19,13 +19,45 @@ cd server
 cp .env.example .env          # set DATABASE_URL
 npm install
 npx prisma migrate deploy     # applies migrations, including append-only triggers
-npm run dev                   # http://localhost:3000
+npm run dev                   # http://localhost:3000 (SEED_DEMO=true seeds demo data on first start)
 
 # 2. Frontend (separate terminal)
 cd web
 npm install
 npm run dev                   # http://localhost:5173, proxies /api to :3000
 ```
+
+**Demo logins:** `meera@arvo.test` (manager) and `anu@`, `ravi@`, `priya@`, `arjun@`, `divya@`, `kiran@`, `sneha@`, `vivek@`, `nikhil@arvo.test` (agents). Password for all: `frontdesk123`. The seed includes a late urgent ticket, one waiting on the customer, one with an internal note, a new one, and a resolved one.
+
+### Tests
+
+```bash
+cd server
+npm test          # SLA engine, timeline and no-leak checks (no database needed)
+npm run test:db   # API tests for INC-0291, INC-0304, INC-0318 against DATABASE_URL
+```
+
+The database tests only insert rows with unique emails, so they can run against a dev database. They cannot clean up after themselves, because the audit tables are append-only.
+
+## API
+
+| Agent (login required) | Customer (secret ticket link, no login) |
+|---|---|
+| `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | `POST /api/customer/tickets` |
+| `GET /api/tickets?view=mine\|unassigned\|all` | `GET /api/customer/tickets/:token` |
+| `GET /api/tickets/:id` (messages, notes, audit trail, SLA) | `POST /api/customer/tickets/:token/messages` |
+| `POST /api/tickets/:id/claim` | |
+| `POST /api/tickets/:id/replies` `{ body, waitForCustomer }` | |
+| `POST /api/tickets/:id/notes` `{ body }` | |
+| `POST /api/tickets/:id/status` `{ status, version? }` | |
+| `POST /api/tickets/:id/priority` `{ priority, version? }` | |
+| `GET /api/reports/late?since=` | |
+
+## How the three incidents are handled
+
+- **INC-0291, two agents took the same ticket.** Claiming is one conditional `UPDATE … WHERE assignee_id IS NULL`, so the database lets exactly one agent win and the other gets a 409 naming the winner. Only the assigned agent can reply. No external lock (such as Redis) is needed: ownership is a column, and the row lock lasts only for that one statement.
+- **INC-0304, a private note reached a customer.** Notes live in their own table. The customer code path (routes, service and shared helpers) never references it, which a test checks, and customer responses are built from an explicit field whitelist. The audit log records a note's id, never its text.
+- **INC-0318, nobody could prove when a reply was sent.** Every change is written in the same transaction as an audit event carrying who did it and when, with the time taken from the database clock. Database triggers reject any UPDATE, DELETE or TRUNCATE on the audit log, messages and notes. SLA results are computed from that log, so "which tickets were late and why" is answered by `GET /api/reports/late`.
 
 ## Design decisions
 
