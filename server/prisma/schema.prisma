@@ -108,6 +108,9 @@ model Ticket {
   // A new ticket created after the reopen window points back to the old one
   reopenedFromId Int? @map("reopened_from_id")
 
+  // Secret per-ticket token so customers can view and reply without a login
+  accessToken String @unique @map("access_token")
+
   // SLA cache for the list screen (source of truth is ticket_events)
   responseDueAt DateTime? @map("response_due_at") @db.Timestamptz(3)
   resolveDueAt  DateTime? @map("resolve_due_at") @db.Timestamptz(3)

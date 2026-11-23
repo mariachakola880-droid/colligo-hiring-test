@@ -1,27 +1,14 @@
-import express from 'express';
-import cookieParser from 'cookie-parser';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { app } from './app.js';
+import { config } from './config.js';
+import { runAutoClose } from './jobs/autoClose.js';
+import { seedDemoData } from './seed.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const app = express();
+if (process.env.SEED_DEMO === 'true') {
+  await seedDemoData().catch((err) => console.error('Demo seed failed:', err));
+}
 
-app.use(express.json());
-app.use(cookieParser());
+app.listen(config.port, () => console.log(`Frontdesk listening on :${config.port}`));
 
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
-
-// TODO: mount routes
-// app.use('/api/auth', authRoutes);
-// app.use('/api/tickets', ticketRoutes);   // agent-facing (may include internal notes)
-// app.use('/api/customer', customerRoutes); // customer-facing (must never touch internal_notes)
-
-// Serve the built React app (web/dist) from the same service
-const webDist = path.resolve(__dirname, '../../web/dist');
-app.use(express.static(webDist));
-app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(webDist, 'index.html')));
-
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Frontdesk listening on :${port}`));
-
-export default app;
+// Scheduled auto-close. Reads also run it lazily, because a free host may sleep this process.
+const FIVE_MIN = 5 * 60 * 1000;
+setInterval(() => runAutoClose().catch((err) => console.error('Auto-close failed:', err)), FIVE_MIN);

@@ -34,3 +34,11 @@ services:
         generateValue: true
       - key: BUSINESS_TZ
         value: Asia/Kolkata
+      # Secure login cookie + startup check that JWT_SECRET is set.
+      # Builds still get devDependencies because the build uses --include=dev.
+      - key: NODE_ENV
+        value: production
+      # Seed demo agents (password frontdesk123) and tickets on first start, so reviewers can log in.
+      # Skipped once meera@arvo.test exists.
+      - key: SEED_DEMO
+        value: "true"
