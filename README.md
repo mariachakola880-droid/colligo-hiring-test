@@ -61,4 +61,5 @@ The brief gives a story rather than a requirements list. These are the rules I t
 
 - **Auto-close** after 5 working days with no customer reply while waiting on them.
 - **An auto-closed ticket is not "resolved".** Its open timers end as `closed_no_reply`: neither met nor breached, so customers who go quiet don't inflate the on-time rate. If a timer had already breached before the ticket went quiet, it stays breached.
+- **Closing can't be used to dodge a deadline.** Agents can only close tickets that are already resolved; only the auto-close job closes a ticket that is waiting on the customer. As a backstop in the SLA engine, only a close while a waiting-on-customer pause is open counts as `closed_no_reply`. Any other close is judged against the deadline as if the ticket had been resolved at that moment.
 - **Reopen window** is 7 calendar days after resolution. After that, a customer message starts a new ticket linked to the old one.

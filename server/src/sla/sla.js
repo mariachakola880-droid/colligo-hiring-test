@@ -14,9 +14,11 @@
 //     so an honest escalation does not create an instant breach, but the grace
 //     never extends past the earliest deadline under any earlier priority, so
 //     toggling priority cannot buy extra time.
-// - A ticket closed without being resolved (e.g. auto-closed after the customer
-//   went quiet) is neither met nor breached: its timers end as 'closed_no_reply',
-//   unless they had already breached.
+// - A ticket closed while waiting on the customer (auto-close after they went
+//   quiet) is neither met nor breached: its open timers end as 'closed_no_reply',
+//   unless they had already breached. Any other close is judged against the
+//   deadline as if the ticket had been resolved at that moment, so closing a
+//   ticket cannot hide a breach.
 import { SLA_TARGETS, PRIORITY_CHANGE_GRACE_MIN } from './policy.js';
 
 /**
@@ -80,7 +82,8 @@ function evaluateTimer(cal, t, key, completedAt, closedAt, now) {
         const earlier = deadlineFor(j);
         if (earlier && (cap === null || earlier < cap)) cap = earlier;
       }
-      if (cap && cap > due) due = cap;
+      if (cap === null) due = null; // grace still running into an open pause -> paused
+      else if (cap > due) due = cap;
     }
     return (memo[i] = due);
   };
@@ -112,11 +115,13 @@ function evaluateTimer(cal, t, key, completedAt, closedAt, now) {
  * @param {object} t
  * @param {Date} t.createdAt
  * @param {{priority: string, from: Date}[]} t.priorityHistory ascending; first entry starts at createdAt
- * @param {{from: Date, to: Date|null}[]} t.pauses  from the audit log; an open pause has to: null
+ * @param {{from: Date, to: Date|null, reason: string}[]} t.pauses  from the audit log; an open pause
+ *        has to: null; reason is the status that started it ('waiting_on_customer' | 'resolved')
  * @param {Date|null} t.firstResponseAt
  * @param {Date|null} t.resolvedAt  when the ticket was resolved; null if never resolved or reopened since
- * @param {Date|null} [t.closedAt]  when the ticket was closed; a ticket closed without being
- *                                  resolved ends its open timers as 'closed_no_reply' (or 'breached')
+ * @param {Date|null} [t.closedAt]  when the ticket was closed. Closed while waiting on the customer:
+ *        open timers end as 'closed_no_reply' (or 'breached'). Closed any other way without being
+ *        resolved: judged as if resolved at closedAt.
  * @param {Date} now
  *
  * When a timer's state is 'breached', show `breach.dueAt` and `breach.priority`
@@ -126,7 +131,17 @@ function evaluateTimer(cal, t, key, completedAt, closedAt, now) {
 export function computeSla(cal, t, now = new Date()) {
   if (!t.priorityHistory?.length) throw new Error('priorityHistory is required');
   const closedAt = t.closedAt ?? null;
-  const response = evaluateTimer(cal, t, 'responseMin', t.firstResponseAt, t.firstResponseAt ? null : closedAt, now);
-  const resolution = evaluateTimer(cal, t, 'resolveMin', t.resolvedAt, t.resolvedAt ? null : closedAt, now);
+  // Only a close while a waiting-on-customer pause is open counts as "no reply".
+  // Inclusive end: a timeline may end the waiting pause at the very moment of the close.
+  const closedWaiting = closedAt !== null && t.pauses.some((p) =>
+    p.reason === 'waiting_on_customer' && p.from <= closedAt && (p.to === null || p.to >= closedAt));
+
+  const judge = (key, satisfiedAt) => {
+    if (satisfiedAt || !closedAt) return evaluateTimer(cal, t, key, satisfiedAt, null, now);
+    if (closedWaiting) return evaluateTimer(cal, t, key, null, closedAt, now);
+    return evaluateTimer(cal, t, key, closedAt, null, now); // closed unresolved: judged as resolved now
+  };
+  const response = judge('responseMin', t.firstResponseAt);
+  const resolution = judge('resolveMin', t.resolvedAt);
   return { response, resolution, isLate: response.state === 'breached' || resolution.state === 'breached' };
 }

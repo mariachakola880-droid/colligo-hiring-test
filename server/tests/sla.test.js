@@ -198,7 +198,7 @@ test('auto-closed while waiting on the customer is closed_no_reply, not met or p
     priorityHistory: [{ priority: 'medium', from: ist('2026-11-23T09:30') }],
     createdAt: ist('2026-11-23T09:30'),
     firstResponseAt: ist('2026-11-23T10:00'),
-    pauses: [{ from: ist('2026-11-23T10:00'), to: null }],
+    pauses: [{ from: ist('2026-11-23T10:00'), to: null, reason: 'waiting_on_customer' }],
     resolvedAt: null,
     closedAt: ist('2026-11-30T10:00'),
   }, ist('2026-12-15T12:00'));
@@ -214,7 +214,7 @@ test('a ticket that breached before the customer went quiet stays breached after
     priorityHistory: [{ priority: 'urgent', from: ist('2026-11-23T09:30') }],
     createdAt: ist('2026-11-23T09:30'),
     firstResponseAt: ist('2026-11-23T10:00'),
-    pauses: [{ from: ist('2026-11-24T12:00'), to: null }],
+    pauses: [{ from: ist('2026-11-24T12:00'), to: null, reason: 'waiting_on_customer' }],
     resolvedAt: null,
     closedAt: ist('2026-12-01T12:00'),
   }, ist('2026-12-15T12:00'));
@@ -228,9 +228,58 @@ test('a resolved ticket that is later closed keeps its resolution result', () =>
     priorityHistory: [{ priority: 'urgent', from: ist('2026-11-23T09:30') }],
     createdAt: ist('2026-11-23T09:30'),
     firstResponseAt: ist('2026-11-23T10:00'),
-    pauses: [{ from: ist('2026-11-23T15:00'), to: null }],
+    pauses: [{ from: ist('2026-11-23T15:00'), to: null, reason: 'resolved' }],
     resolvedAt: ist('2026-11-23T15:00'),
     closedAt: ist('2026-11-30T15:00'),
   }, ist('2026-12-15T12:00'));
   assert.equal(sla.resolution.state, 'met');
+});
+
+test('escalation followed by a question to the customer shows paused, not breached', () => {
+  // Medium created Mon 09:30, replied Mon 10:00. Escalated to urgent Tue 10:00,
+  // agent asks the customer a question Tue 10:10 (10 of the 30 grace minutes used).
+  const base = {
+    createdAt: ist('2026-11-23T09:30'),
+    priorityHistory: [{ priority: 'medium', from: ist('2026-11-23T09:30') }, { priority: 'urgent', from: ist('2026-11-24T10:00') }],
+    firstResponseAt: ist('2026-11-23T10:00'), resolvedAt: null,
+  };
+  const waiting = computeSla(cal, { ...base, pauses: [{ from: ist('2026-11-24T10:10'), to: null, reason: 'waiting_on_customer' }] }, ist('2026-11-24T12:00'));
+  assert.equal(waiting.resolution.state, 'paused');
+  assert.equal(waiting.resolution.breach, null);
+  assert.equal(waiting.isLate, false);
+
+  // Customer replies Wed 10:00: the remaining 20 grace minutes run from there
+  const resumed = computeSla(cal, { ...base, pauses: [{ from: ist('2026-11-24T10:10'), to: ist('2026-11-25T10:00'), reason: 'waiting_on_customer' }] }, ist('2026-11-25T10:05'));
+  assert.equal(resumed.resolution.state, 'on_track');
+  assert.deepEqual(resumed.resolution.dueAt, ist('2026-11-25T10:20'));
+});
+
+test('closing an unresolved ticket outside waiting is judged against the deadline', () => {
+  // Urgent, resolution due Mon 18:30, replied 10:00, never waiting on the customer
+  const base = {
+    createdAt: ist('2026-11-23T09:30'),
+    priorityHistory: [{ priority: 'urgent', from: ist('2026-11-23T09:30') }],
+    firstResponseAt: ist('2026-11-23T10:00'), resolvedAt: null,
+  };
+  // Closed after the deadline: breached (closing cannot hide it)
+  const late = computeSla(cal, { ...base, pauses: [{ from: ist('2026-11-23T18:40'), to: null, reason: 'closed' }], closedAt: ist('2026-11-23T18:40') }, ist('2026-11-24T10:00'));
+  assert.equal(late.resolution.state, 'breached');
+  assert.equal(late.isLate, true);
+  // Closed before the deadline: judged as resolved at that moment, never closed_no_reply
+  const early = computeSla(cal, { ...base, pauses: [{ from: ist('2026-11-23T18:25'), to: null, reason: 'closed' }], closedAt: ist('2026-11-23T18:25') }, ist('2026-11-24T10:00'));
+  assert.equal(early.resolution.state, 'met');
+});
+
+test('auto-close is closed_no_reply even if the waiting pause ends exactly at the close', () => {
+  // Same as scenario H, but the timeline ended the waiting pause at the close instead of leaving it open
+  const sla = computeSla(cal, {
+    priorityHistory: [{ priority: 'medium', from: ist('2026-11-23T09:30') }],
+    createdAt: ist('2026-11-23T09:30'),
+    firstResponseAt: ist('2026-11-23T10:00'),
+    pauses: [{ from: ist('2026-11-23T10:00'), to: ist('2026-11-30T10:00'), reason: 'waiting_on_customer' }],
+    resolvedAt: null,
+    closedAt: ist('2026-11-30T10:00'),
+  }, ist('2026-12-15T12:00'));
+  assert.equal(sla.resolution.state, 'closed_no_reply');
+  assert.equal(sla.isLate, false);
 });
