@@ -2,6 +2,14 @@
 
 Support ticket system for Arvo Systems: Node (Express) + Prisma + PostgreSQL backend, React (Vite) agent screen.
 
+**Live:** https://frontdesk-9ng8.onrender.com/
+
+- Agents: sign in as `meera@arvo.test` (manager) or `anu@arvo.test` (agent), password `frontdesk123`.
+- Customers: start a request at https://frontdesk-9ng8.onrender.com/support
+- It runs on Render's free tier, so the first visit after a quiet spell can take up to a minute while the server wakes up.
+
+What I didn't finish, and why: see [NOTE.md](NOTE.md).
+
 ## Structure
 
 ```
@@ -28,6 +36,17 @@ npm run dev                   # http://localhost:5173, proxies /api to :3000
 ```
 
 **Demo logins:** `meera@arvo.test` (manager) and `anu@`, `ravi@`, `priya@`, `arjun@`, `divya@`, `kiran@`, `sneha@`, `vivek@`, `nikhil@arvo.test` (agents). Password for all: `frontdesk123`. The seed includes a late urgent ticket, one waiting on the customer, one with an internal note, a new one, and a resolved one.
+
+### Screens
+
+- **`/`: agent desk.** The queue sorts late tickets first (red, with the deadline they missed), then by the soonest deadline, then tickets waiting on the customer (amber). Opening a ticket shows both SLA timers, the conversation, the composer and the full history.
+- **Reply vs team note.** The composer has two modes. Switching to *Team note* turns the whole composer yellow and hatched, with a warning that it is never sent to the customer, and notes look the same in the thread (INC-0304). The *I'm asking the customer something* box on a reply is the only way to pause the clock.
+- **History** lists every recorded event with who did it and the exact time to the second (INC-0318).
+- **`/reports/late`: late tickets.** Every ticket that missed a deadline, which deadline, when, and under which priority.
+- **`/support` and `/t/:token`: customer side.** A new-request form and a private link where the customer follows the conversation, replies, or reopens a resolved ticket within 7 days. The form asks how much the problem affects them, in Meera's words ("I cannot work at all" is urgent, and so on), with nothing preselected: severity decides which promise applies, so a default would bias it. The API itself treats a missing priority as low. Because there are no customer accounts or emails, the private link is the customer's only way back, so their ticket page shows it in full with a *Copy link* button (highlighted as "Request sent. Save this link" right after they submit, and again when a message to a closed ticket starts a new linked request).
+- **On a phone**, the desk shows one pane at a time: the queue, or the open ticket with a link back.
+
+All times are shown in the business time zone, so "due 11:30" means Arvo's 11:30 wherever the viewer is.
 
 ### Tests
 
@@ -57,7 +76,7 @@ The database tests only insert rows with unique emails, so they can run against 
 
 - **INC-0291, two agents took the same ticket.** Claiming is one conditional `UPDATE … WHERE assignee_id IS NULL`, so the database lets exactly one agent win and the other gets a 409 naming the winner. Only the assigned agent can reply. No external lock (such as Redis) is needed: ownership is a column, and the row lock lasts only for that one statement.
 - **INC-0304, a private note reached a customer.** Notes live in their own table. The customer code path (routes, service and shared helpers) never references it, which a test checks, and customer responses are built from an explicit field whitelist. The audit log records a note's id, never its text.
-- **INC-0318, nobody could prove when a reply was sent.** Every change is written in the same transaction as an audit event carrying who did it and when, with the time taken from the database clock. Database triggers reject any UPDATE, DELETE or TRUNCATE on the audit log, messages and notes. SLA results are computed from that log, so "which tickets were late and why" is answered by `GET /api/reports/late`.
+- **INC-0318, nobody could prove when a reply was sent.** Every change is written in the same transaction as an audit event carrying who did it and when. The time comes from the database clock: an insert trigger stamps it on every audit event, message, note and ticket, overwriting whatever the app sends, so neither the app server's clock nor a bug can backdate the record. Database triggers also reject any UPDATE, DELETE or TRUNCATE on the audit log, messages and notes. SLA results are computed from that log, so "which tickets were late and why" is answered by `GET /api/reports/late`.
 
 ## Design decisions
 

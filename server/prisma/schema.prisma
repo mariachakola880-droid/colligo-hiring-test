@@ -2,9 +2,12 @@
 // All timestamps are timestamptz (stored in UTC).
 // Business hours and holidays are evaluated by the app in BUSINESS_TZ (e.g. Asia/Kolkata).
 //
-// NOT expressible in Prisma, added by hand in the init migration:
+// NOT expressible in Prisma, added by hand in migrations:
 //   - append-only triggers on ticket_events, messages, internal_notes (INC-0318)
 //   - CHECK constraint: every message has exactly one author
+//   - insert triggers that stamp created_at / occurred_at with the DB clock on tickets,
+//     messages, internal_notes and ticket_events. Prisma sends the app server's time for
+//     @default(now()); the trigger overwrites it (migration 20261123000000_db_clock_timestamps)
 
 generator client {
   provider = "prisma-client-js"
@@ -178,7 +181,7 @@ model TicketEvent {
   // sla_paused, sla_resumed, reopened, auto_closed ...
   eventType  String    @map("event_type")
   payload    Json      @default("{}") // old/new values etc.
-  // DB clock, never client-supplied
+  // Stamped by a DB trigger on insert; any value the app sends is overwritten
   occurredAt DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(3)
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Restrict)

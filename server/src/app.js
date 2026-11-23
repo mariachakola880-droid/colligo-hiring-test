@@ -6,6 +6,7 @@ import { authRoutes } from './auth.js';
 import { ticketRoutes, reportRoutes } from './routes/tickets.js';
 import { customerRoutes } from './routes/customer.js';
 import { errorHandler } from './http.js';
+import { config } from './config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,6 +16,8 @@ app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+// The UI shows every time in the business time zone, so "due 11:30" means Arvo's 11:30
+app.get('/api/meta', (_req, res) => res.json({ businessTz: config.businessTz }));
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);    // agent-facing (includes internal notes)
 app.use('/api/reports', reportRoutes);    // agent-facing

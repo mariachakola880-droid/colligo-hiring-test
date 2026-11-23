@@ -3,8 +3,9 @@
 // manager already exists, so other agents (e.g. from DB tests) never block it.
 // Runs in ONE transaction: if anything fails, nothing is written and the next start
 // seeds again, so the demo can never be left half-populated.
-// Seed tickets are backdated so the demo shows late / paused / on-track tickets; this is
-// the only code that ever supplies an event timestamp. The app always uses the DB clock.
+// Seed tickets are backdated so the demo shows late / paused / on-track tickets. Database
+// triggers normally overwrite every audit timestamp with the database clock; the seed is the
+// only code that switches that off, for its own transaction (frontdesk.allow_backdate).
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from './db.js';
@@ -41,6 +42,10 @@ export async function seedDemoData() {
   const cal = makeCalendar({ tz: config.businessTz, holidays: HOLIDAYS.map(([date]) => date) });
 
   await prisma.$transaction(async (tx) => {
+    // Let this transaction keep the backdated times below (see migration db_clock_timestamps).
+    // The third argument makes the setting end with this transaction.
+    await tx.$queryRaw`SELECT set_config('frontdesk.allow_backdate', 'on', true)`;
+
     const agents = {};
     for (const [name, role] of AGENTS) {
       const email = normalizeEmail(`${name}@arvo.test`);

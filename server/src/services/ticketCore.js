@@ -8,7 +8,7 @@ export const SYSTEM = { type: 'system', id: null };
 export const asAgent = (agent) => ({ type: 'agent', id: agent.id });
 export const asCustomer = (customerId) => ({ type: 'customer', id: customerId });
 
-/** Append one audit event. occurred_at always comes from the DB clock. */
+/** Append one audit event. occurred_at is stamped by a DB trigger with the database clock. */
 export function recordEvent(tx, ticketId, actor, eventType, payload = {}) {
   return tx.ticketEvent.create({
     data: { ticketId, actorType: actor.type, actorId: actor.id ?? null, eventType, payload },

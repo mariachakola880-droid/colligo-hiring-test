@@ -7,7 +7,7 @@ import { autoCloseIfDue } from '../jobs/autoClose.js';
 import {
   asAgent, recordEvent, transition, refreshSlaCache, slaEventsInclude, slaFor, slaToJson,
 } from './ticketCore.js';
-import { agentTransitionError } from './rules.js';
+import { agentTransitionError, ticketPhrase } from './rules.js';
 
 const PRIORITIES = ['urgent', 'medium', 'low'];
 
@@ -144,7 +144,7 @@ export async function claimTicket(id, agent) {
       const now = await tx.ticket.findUnique({ where: { id }, include: { assignee: { select: { id: true, name: true } } } });
       if (now.assigneeId === agent.id) return; // already mine: idempotent
       if (now.assignee) throw new HttpError(409, `Already claimed by ${now.assignee.name}`);
-      throw new HttpError(409, `A ${now.status} ticket cannot be claimed`);
+      throw new HttpError(409, `Cannot claim ${ticketPhrase(now.status)}`);
     }
     await recordEvent(tx, id, asAgent(agent), 'claimed', { assigneeId: agent.id });
     if (before.status === 'new') {
@@ -164,7 +164,7 @@ export async function replyToCustomer(id, agent, { body, waitForCustomer = false
     if (t.assigneeId !== agent.id) {
       throw new HttpError(403, t.assigneeId === null ? 'Claim this ticket before replying' : 'Only the assigned agent can reply');
     }
-    if (!['open', 'waiting_on_customer'].includes(t.status)) throw new HttpError(409, `Cannot reply to a ${t.status} ticket`);
+    if (!['open', 'waiting_on_customer'].includes(t.status)) throw new HttpError(409, `Cannot reply to ${ticketPhrase(t.status)}`);
 
     const msg = await tx.message.create({ data: { ticketId: id, authorType: 'agent', agentId: agent.id, body: text } });
     await recordEvent(tx, id, asAgent(agent), 'replied', { messageId: msg.id });
