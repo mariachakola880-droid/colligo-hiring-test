@@ -118,3 +118,44 @@ test('the database rejects an agent email that is not lowercase', { skip }, asyn
   await setup();
   await assert.rejects(prisma.agent.create({ data: { name: 'Mixed', email: `Mixed-${uid}@Test.Local`, passwordHash: 'x' } }));
 });
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const wasStampedNow = (date, sentTime) => date.getTime() > sentTime.getTime() + WEEK_MS - 60 * 60 * 1000;
+
+test('INC-0318: record times come from the database clock, whatever the app sends', { skip }, async () => {
+  await setup();
+  const { id } = await newTicket();
+  const ticket = await prisma.ticket.findUnique({ where: { id } });
+  const weekAgo = new Date(Date.now() - WEEK_MS);
+
+  const event = await prisma.ticketEvent.create({
+    data: { ticketId: id, actorType: 'system', eventType: 'backdate_attempt', occurredAt: weekAgo },
+  });
+  const message = await prisma.message.create({
+    data: { ticketId: id, authorType: 'customer', customerId: ticket.customerId, body: 'backdated?', createdAt: weekAgo },
+  });
+  const backdatedTicket = await prisma.ticket.create({
+    data: { customerId: ticket.customerId, subject: 'backdated?', priority: 'low', accessToken: `backdate-${uid}`, createdAt: weekAgo },
+  });
+
+  assert.ok(wasStampedNow(event.occurredAt, weekAgo), `event kept the sent time ${event.occurredAt.toISOString()}`);
+  assert.ok(wasStampedNow(message.createdAt, weekAgo), `message kept the sent time ${message.createdAt.toISOString()}`);
+  assert.ok(wasStampedNow(backdatedTicket.createdAt, weekAgo), `ticket kept the sent time ${backdatedTicket.createdAt.toISOString()}`);
+});
+
+test('only a transaction that sets the seed flag can backdate, and the flag ends with it', { skip }, async () => {
+  await setup();
+  const { id } = await newTicket();
+  const weekAgo = new Date(Date.now() - WEEK_MS);
+
+  const seeded = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT set_config('frontdesk.allow_backdate', 'on', true)`;
+    return tx.ticketEvent.create({ data: { ticketId: id, actorType: 'system', eventType: 'seed_backdate', occurredAt: weekAgo } });
+  });
+  assert.equal(seeded.occurredAt.getTime(), weekAgo.getTime());
+
+  // Run a few inserts so at least one reuses the seeded connection: the flag must not linger
+  const after = await Promise.all([1, 2, 3].map(() =>
+    prisma.ticketEvent.create({ data: { ticketId: id, actorType: 'system', eventType: 'after_seed', occurredAt: weekAgo } })));
+  for (const e of after) assert.ok(wasStampedNow(e.occurredAt, weekAgo), 'backdating leaked past the seed transaction');
+});
